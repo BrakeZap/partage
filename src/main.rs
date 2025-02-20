@@ -2,6 +2,7 @@ use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 use rand::Rng;
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io;
@@ -82,17 +83,17 @@ fn main() {
             let hash = hasher.finalize();
             let h = &hash[..];
             let mut vec: Vec<u8> = Vec::new();
+
             println!("Reading file...");
             let _ = file.read_to_end(&mut vec);
+
             println!("Uploading file...");
             let client = reqwest::blocking::Client::new();
             let id = generate_id();
-            //TODO: Generate Checksum?
+
             let res = client
-                .post("http://localhost:3030/create/".to_owned() + &id)
-                .body(vec)
-                .header("content-type", "application/octet-stream")
-                .header("checksum", h)
+                .post("http://localhost:3030/create")
+                .json(&json!({"id": id, "file": vec, "hash": h}))
                 .send();
 
             match res {

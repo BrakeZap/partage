@@ -859,6 +859,7 @@ dependencies = [
  "clap",
  "rand",
  "reqwest",
+ "serde_json",
  "sha2",
 ]
 
