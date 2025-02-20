@@ -2,24 +2,35 @@ use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 use rand::Rng;
+use sha2::{Digest, Sha256};
+use std::fs::File;
+use std::io;
+use std::io::prelude::*;
+use std::path::Path;
 #[derive(Subcommand)]
 enum Commands {
-    /// Create a new lobby with a random code
-    Create,
+    /// Create and upload a file with a random id
+    Create(CreateArgs),
 
-    /// Join a lobby with a specified code
-    Join(JoinArgs),
+    /// Download a file from an id
+    Download(DownloadArgs),
 }
 
 #[derive(Args)]
-struct JoinArgs {
-    /// A valid id to join
+struct CreateArgs {
+    /// File to upload
+    file: String,
+}
+
+#[derive(Args)]
+struct DownloadArgs {
+    /// A valid id to download
     #[arg(value_parser = valid_id)]
-    join: String,
+    download: String,
 }
 
 #[derive(Parser)]
-#[command(version, about="A simple cli chat client built in Rust!", long_about=None)]
+#[command(version, about="A simple cli to share files easily", long_about=None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -57,10 +68,43 @@ fn main() {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Create => println!(
-            "You have successfully created a new room with the id: {}",
-            generate_id()
-        ),
-        Commands::Join(join_args) => todo!(),
+        Commands::Create(create_args) => {
+            let path = Path::new(&create_args.file);
+            //TODO: Compress file before hand?
+            let mut file = match File::open(path) {
+                Ok(f) => f,
+                Err(err) => panic!("Could not open file: {}", err),
+            };
+            println!("Generating checksum...");
+            let mut hasher = Sha256::new();
+            let _ = io::copy(&mut file, &mut hasher);
+
+            let hash = hasher.finalize();
+            let h = &hash[..];
+            let mut vec: Vec<u8> = Vec::new();
+            println!("Reading file...");
+            let _ = file.read_to_end(&mut vec);
+            println!("Uploading file...");
+            let client = reqwest::blocking::Client::new();
+            let id = generate_id();
+            //TODO: Generate Checksum?
+            let res = client
+                .post("http://localhost:3030/create/".to_owned() + &id)
+                .body(vec)
+                .header("content-type", "application/octet-stream")
+                .header("checksum", h)
+                .send();
+
+            match res {
+                Ok(_) => {
+                    println!(
+                "You have successfully uploaded a new file with the id: {}. Feel free to share it with friends!",
+                id
+                )
+                }
+                Err(err) => panic!("Error with uploading the file: {}", err),
+            };
+        }
+        Commands::Download(download_args) => todo!(),
     }
 }
