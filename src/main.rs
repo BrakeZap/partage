@@ -81,16 +81,18 @@ fn main() {
             let _ = io::copy(&mut file, &mut hasher);
 
             let hash = hasher.finalize();
-            let h = &hash[..];
+            let h: Vec<u8> = hash[..].to_vec();
             let mut vec: Vec<u8> = Vec::new();
 
             println!("Reading file...");
+            let _ = file.seek(io::SeekFrom::Start(0));
             let _ = file.read_to_end(&mut vec);
 
             println!("Uploading file...");
             let client = reqwest::blocking::Client::new();
             let id = generate_id();
-
+            let json = json!({"id": id, "file": vec, "hash": h});
+            println!("{}", json);
             let res = client
                 .post("http://localhost:3030/create")
                 .json(&json!({"id": id, "file": vec, "hash": h}))
