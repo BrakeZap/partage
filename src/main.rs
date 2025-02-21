@@ -125,9 +125,13 @@ fn main() {
             match res {
                 Ok(_) => {
                     println!(
-                "You have successfully uploaded a new file with the id: {}. Feel free to share it with friends!",
-                id
-                )
+                        "{} {} {}",
+                        "You have successfully uploaded a new file with the id:"
+                            .bold()
+                            .green(),
+                        id,
+                        "Feel free to share it with friends!".bold().green(),
+                    )
                 }
                 Err(_) => {
                     println!(
@@ -184,7 +188,7 @@ fn main() {
 
             let _ = file.write_all(&json.file);
 
-            println!("Completed!");
+            println!("{}", "Completed!".green());
         }
     }
 }
