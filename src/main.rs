@@ -2,6 +2,7 @@ use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 use rand::Rng;
+use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fs::File;
@@ -64,6 +65,12 @@ fn generate_id() -> String {
     }
     new_string
 }
+#[derive(Deserialize)]
+struct ResponseFile {
+    file_name: String,
+    file: Vec<u8>,
+    hash: Vec<u8>,
+}
 
 fn main() {
     let cli = Cli::parse();
@@ -71,11 +78,25 @@ fn main() {
     match &cli.command {
         Commands::Create(create_args) => {
             let path = Path::new(&create_args.file);
+
+            if !path.is_file() {
+                panic!("Specified file is not a file!");
+            }
+
             //TODO: Compress file before hand?
+
+            //TODO: Encrypt file beforehand
+
             let mut file = match File::open(path) {
                 Ok(f) => f,
                 Err(err) => panic!("Could not open file: {}", err),
             };
+
+            let file_name = match path.file_name().unwrap().to_str() {
+                Some(name) => name,
+                None => panic!("Invalid file name!"),
+            };
+
             println!("Generating checksum...");
             let mut hasher = Sha256::new();
             let _ = io::copy(&mut file, &mut hasher);
@@ -91,11 +112,9 @@ fn main() {
             println!("Uploading file...");
             let client = reqwest::blocking::Client::new();
             let id = generate_id();
-            let json = json!({"id": id, "file": vec, "hash": h});
-            println!("{}", json);
             let res = client
                 .post("http://localhost:3030/create")
-                .json(&json!({"id": id, "file": vec, "hash": h}))
+                .json(&json!({"id": id, "file": vec, "hash": h, "file_name": file_name}))
                 .send();
 
             match res {
@@ -108,6 +127,31 @@ fn main() {
                 Err(err) => panic!("Error with uploading the file: {}", err),
             };
         }
-        Commands::Download(download_args) => todo!(),
+        Commands::Download(download_args) => {
+            println!("Downloading the file...");
+
+            let response = match reqwest::blocking::get(
+                "http://localhost:3030/download/".to_owned() + &download_args.download,
+            ) {
+                Ok(res) => res,
+                Err(err) => panic!("Error downloading the file: {}", err),
+            };
+
+            let json = match response.json::<ResponseFile>() {
+                Ok(j) => j,
+                Err(err) => panic!("A file with that id does not exist: {}", err),
+            };
+
+            println!("Writing to file...");
+
+            let mut file = match File::create(json.file_name) {
+                Ok(f) => f,
+                Err(err) => panic!("Error creating the file, please try again: {}", err),
+            };
+
+            let _ = file.write_all(&json.file);
+            //TODO: Check file hash
+            println!("Completed!");
+        }
     }
 }
