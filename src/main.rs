@@ -1,12 +1,12 @@
 use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
+use colored::Colorize;
 use rand::Rng;
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fs::File;
-use std::io;
 use std::io::prelude::*;
 use std::path::Path;
 #[derive(Subcommand)]
@@ -80,34 +80,39 @@ fn main() {
             let path = Path::new(&create_args.file);
 
             if !path.is_file() {
-                panic!("Specified file is not a file!");
+                println!("{}", "Specified file is not a file!".red());
+                return;
             }
-
             //TODO: Compress file before hand?
 
             //TODO: Encrypt file beforehand
 
             let mut file = match File::open(path) {
                 Ok(f) => f,
-                Err(err) => panic!("Could not open file: {}", err),
+                Err(_) => {
+                    println!("{}", "Could not open file".red());
+                    return;
+                }
             };
 
             let file_name = match path.file_name().unwrap().to_str() {
                 Some(name) => name,
-                None => panic!("Invalid file name!"),
+                None => {
+                    println!("{}", "Invalid file name!".red());
+                    return;
+                }
             };
 
-            println!("Generating checksum...");
-            let mut hasher = Sha256::new();
-            let _ = io::copy(&mut file, &mut hasher);
-
-            let hash = hasher.finalize();
-            let h: Vec<u8> = hash[..].to_vec();
             let mut vec: Vec<u8> = Vec::new();
 
             println!("Reading file...");
-            let _ = file.seek(io::SeekFrom::Start(0));
+            //let _ = file.seek(io::SeekFrom::Start(0));
             let _ = file.read_to_end(&mut vec);
+
+            let mut hasher = Sha256::new();
+            hasher.update(&vec[..]);
+            let hash = hasher.finalize();
+            let h: Vec<u8> = hash[..].to_vec();
 
             println!("Uploading file...");
             let client = reqwest::blocking::Client::new();
@@ -124,7 +129,12 @@ fn main() {
                 id
                 )
                 }
-                Err(err) => panic!("Error with uploading the file: {}", err),
+                Err(_) => {
+                    println!(
+                        "{}",
+                        "Error with uploading the file... Please try again.".bright_red()
+                    );
+                }
             };
         }
         Commands::Download(download_args) => {
@@ -134,23 +144,46 @@ fn main() {
                 "http://localhost:3030/download/".to_owned() + &download_args.download,
             ) {
                 Ok(res) => res,
-                Err(err) => panic!("Error downloading the file: {}", err),
+                Err(_) => {
+                    println!("{}", "Error downloading the file!".bright_red());
+                    return;
+                }
             };
 
             let json = match response.json::<ResponseFile>() {
                 Ok(j) => j,
-                Err(err) => panic!("A file with that id does not exist: {}", err),
+                Err(_) => {
+                    println!("{}", "A file with that id does not exist!".red());
+                    return;
+                }
             };
+
+            println!("Checking hash...");
+
+            let mut hasher = Sha256::new();
+            hasher.update(&json.file[..]);
+            let hash = hasher.finalize();
+            let h: Vec<u8> = hash[..].to_vec();
+
+            if h != json.hash {
+                println!("{}", "Hash not equal! Aborting...".red());
+                return;
+            }
+
+            println!("Hash is equal!");
 
             println!("Writing to file...");
 
             let mut file = match File::create(json.file_name) {
                 Ok(f) => f,
-                Err(err) => panic!("Error creating the file, please try again: {}", err),
+                Err(_) => {
+                    println!("{}", "Error creating the file, please try again: {}".red());
+                    return;
+                }
             };
 
             let _ = file.write_all(&json.file);
-            //TODO: Check file hash
+
             println!("Completed!");
         }
     }
