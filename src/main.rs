@@ -20,12 +20,18 @@ enum Commands {
 
 #[derive(Args)]
 struct CreateArgs {
+    ///Ip to use
+    ip: String,
+
     /// File to upload
     file: String,
 }
 
 #[derive(Args)]
 struct DownloadArgs {
+    ///Ip to use
+    ip: String,
+
     /// A valid id to download
     #[arg(value_parser = valid_id)]
     download: String,
@@ -118,7 +124,7 @@ fn main() {
             let client = reqwest::blocking::Client::new();
             let id = generate_id();
             let res = client
-                .post("http://localhost:3030/create")
+                .post("http://".to_owned() + &create_args.ip + "/create")
                 .json(&json!({"id": id, "file": vec, "hash": h, "file_name": file_name}))
                 .send();
 
@@ -145,7 +151,7 @@ fn main() {
             println!("Downloading the file...");
 
             let response = match reqwest::blocking::get(
-                "http://localhost:3030/download/".to_owned() + &download_args.download,
+                "http://".to_owned() + &download_args.ip + "/download/" + &download_args.download,
             ) {
                 Ok(res) => res,
                 Err(_) => {
