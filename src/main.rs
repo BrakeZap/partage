@@ -129,7 +129,16 @@ fn main() {
                 .send();
 
             match res {
-                Ok(_) => {
+                Ok(r) => {
+                    if !r.status().is_success() {
+                        println!(
+                            "{} {:?}",
+                            "Error with uploading the file:".red(),
+                            r.status()
+                        );
+                        return;
+                    }
+
                     println!(
                         "{} {} {}",
                         "You have successfully uploaded a new file with the id:"
