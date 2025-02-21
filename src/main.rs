@@ -124,7 +124,7 @@ fn main() {
             let client = reqwest::blocking::Client::new();
             let id = generate_id();
             let res = client
-                .post("http://".to_owned() + &create_args.ip + "/create")
+                .post(create_args.ip.clone() + "/create")
                 .json(&json!({"id": id, "file": vec, "hash": h, "file_name": file_name}))
                 .send();
 
@@ -151,7 +151,7 @@ fn main() {
             println!("Downloading the file...");
 
             let response = match reqwest::blocking::get(
-                "http://".to_owned() + &download_args.ip + "/download/" + &download_args.download,
+                download_args.ip.clone() + "/download/" + &download_args.download,
             ) {
                 Ok(res) => res,
                 Err(_) => {
