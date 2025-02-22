@@ -2,9 +2,10 @@ use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 use colored::Colorize;
+use rand::seq::IndexedRandom;
 use rand::Rng;
+use reqwest::blocking::multipart;
 use serde::Deserialize;
-use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::prelude::*;
@@ -101,14 +102,6 @@ fn main() {
                 }
             };
 
-            let file_name = match path.file_name().unwrap().to_str() {
-                Some(name) => name,
-                None => {
-                    println!("{}", "Invalid file name!".red());
-                    return;
-                }
-            };
-
             let mut vec: Vec<u8> = Vec::new();
 
             println!("Reading file...");
@@ -123,38 +116,104 @@ fn main() {
             println!("Uploading file...");
             let client = reqwest::blocking::Client::new();
             let id = generate_id();
-            let res = client
-                .post(create_args.ip.clone() + "/create")
-                .json(&json!({"id": id, "file": vec, "hash": h, "file_name": file_name}))
-                .send();
 
-            match res {
-                Ok(r) => {
-                    if !r.status().is_success() {
+            //TODO: Send file in chunks if it is large
+
+            const CHUNK_SIZE: usize = 1024 * 1024; //1 MB
+
+            let mut buffer: Vec<u8> = vec![0; CHUNK_SIZE];
+
+            let mut chunk_num: usize = 0;
+
+            let total_chunks: usize = vec.len().div_ceil(CHUNK_SIZE);
+
+            let mut reader = std::io::Cursor::new(vec.clone());
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            loop {
+                let read = reader.read(&mut buffer).unwrap();
+
+                if read == 0 {
+                    break;
+                    //return;
+                }
+
+                let form = multipart::Form::new()
+                    .text("file_name", name.to_string())
+                    .text("id", id.clone())
+                    .text("chunk_num", chunk_num.to_string())
+                    .text("total_chunks", total_chunks.to_string())
+                    .part("hash", multipart::Part::bytes(h.to_vec()))
+                    .part("file", multipart::Part::bytes(buffer[..read].to_vec()));
+
+                let res = client
+                    .post(create_args.ip.clone() + "/create")
+                    .multipart(form)
+                    .send();
+
+                match res {
+                    Ok(r) => {
+                        if !r.status().is_success() {
+                            println!(
+                                "{} {:?}",
+                                "Error with uploading the file:".red(),
+                                r.status()
+                            );
+                            return;
+                        }
+                    }
+                    Err(_) => {
                         println!(
-                            "{} {:?}",
-                            "Error with uploading the file:".red(),
-                            r.status()
+                            "{}",
+                            "Error with uploading the file... Please try again.".bright_red()
                         );
                         return;
                     }
+                };
 
-                    println!(
-                        "{} {} {}",
-                        "You have successfully uploaded a new file with the id:"
-                            .bold()
-                            .green(),
-                        id,
-                        "Feel free to share it with friends!".bold().green(),
-                    )
-                }
-                Err(_) => {
-                    println!(
-                        "{}",
-                        "Error with uploading the file... Please try again.".bright_red()
-                    );
-                }
-            };
+                chunk_num += 1;
+            }
+
+            println!(
+                "{} {} {}",
+                "You have successfully uploaded a new file with the id:"
+                    .bold()
+                    .green(),
+                id,
+                "Feel free to share it with friends!".bold().green(),
+            )
+
+            //let res = client
+            //    .post(create_args.ip.clone() + "/create")
+            //    .json(&json!({"id": id, "file": vec, "hash": h, "file_name": file_name}))
+            //    .send();
+
+            //match res {
+            //    Ok(r) => {
+            //        if !r.status().is_success() {
+            //            println!(
+            //                "{} {:?}",
+            //                "Error with uploading the file:".red(),
+            //                r.status()
+            //            );
+            //            return;
+            //        }
+            //
+            //        println!(
+            //            "{} {} {}",
+            //            "You have successfully uploaded a new file with the id:"
+            //                .bold()
+            //                .green(),
+            //            id,
+            //            "Feel free to share it with friends!".bold().green(),
+            //        )
+            //    }
+            //    Err(_) => {
+            //        println!(
+            //            "{}",
+            //            "Error with uploading the file... Please try again.".bright_red()
+            //        );
+            //    }
+            //};
         }
         Commands::Download(download_args) => {
             println!("Downloading the file...");
