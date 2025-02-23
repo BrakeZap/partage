@@ -2,7 +2,6 @@ use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 use colored::Colorize;
-use rand::seq::IndexedRandom;
 use rand::Rng;
 use reqwest::blocking::multipart;
 use serde::Deserialize;
@@ -72,11 +71,11 @@ fn generate_id() -> String {
     }
     new_string
 }
+
 #[derive(Deserialize)]
-struct ResponseFile {
+struct FileProp {
     file_name: String,
-    file: Vec<u8>,
-    hash: Vec<u8>,
+    file_size: String,
 }
 
 fn main() {
@@ -105,7 +104,6 @@ fn main() {
             let mut vec: Vec<u8> = Vec::new();
 
             println!("Reading file...");
-            //let _ = file.seek(io::SeekFrom::Start(0));
             let _ = file.read_to_end(&mut vec);
 
             let mut hasher = Sha256::new();
@@ -181,86 +179,81 @@ fn main() {
                 id,
                 "Feel free to share it with friends!".bold().green(),
             )
-
-            //let res = client
-            //    .post(create_args.ip.clone() + "/create")
-            //    .json(&json!({"id": id, "file": vec, "hash": h, "file_name": file_name}))
-            //    .send();
-
-            //match res {
-            //    Ok(r) => {
-            //        if !r.status().is_success() {
-            //            println!(
-            //                "{} {:?}",
-            //                "Error with uploading the file:".red(),
-            //                r.status()
-            //            );
-            //            return;
-            //        }
-            //
-            //        println!(
-            //            "{} {} {}",
-            //            "You have successfully uploaded a new file with the id:"
-            //                .bold()
-            //                .green(),
-            //            id,
-            //            "Feel free to share it with friends!".bold().green(),
-            //        )
-            //    }
-            //    Err(_) => {
-            //        println!(
-            //            "{}",
-            //            "Error with uploading the file... Please try again.".bright_red()
-            //        );
-            //    }
-            //};
         }
         Commands::Download(download_args) => {
-            println!("Downloading the file...");
-
-            let response = match reqwest::blocking::get(
-                download_args.ip.clone() + "/download/" + &download_args.download,
-            ) {
-                Ok(res) => res,
+            //Send get request to check if file with specified id exists on the server
+            //
+            //Response: File name and size
+            //
+            //
+            //Send a set of get requests that specify the range of bytes wanted by the client
+            //Response: Receive that set of bytes of the file
+            //
+            //After all bytes are sent, check hash of byte array
+            //
+            //Write all bytes into the file
+            //
+            let res = match reqwest::blocking::get(format!(
+                "{}/download/{}",
+                download_args.ip, download_args.download
+            )) {
+                Ok(r) => r,
                 Err(_) => {
-                    println!("{}", "Error downloading the file!".bright_red());
+                    println!("Error, requesting server!");
                     return;
                 }
             };
 
-            let json = match response.json::<ResponseFile>() {
+            let json_file_prop = match res.json::<FileProp>() {
                 Ok(j) => j,
                 Err(_) => {
-                    println!("{}", "A file with that id does not exist!".red());
+                    println!("No file with that id found!");
                     return;
                 }
             };
 
-            println!("Checking hash...");
-
-            let mut hasher = Sha256::new();
-            hasher.update(&json.file[..]);
-            let hash = hasher.finalize();
-            let h: Vec<u8> = hash[..].to_vec();
-
-            if h != json.hash {
-                println!("{}", "Hash not equal! Aborting...".red());
-                return;
-            }
-
-            println!("Hash is equal!");
-
-            println!("Writing to file...");
-
-            let mut file = match File::create(json.file_name) {
+            let mut file = match File::create(json_file_prop.file_name) {
                 Ok(f) => f,
                 Err(_) => {
-                    println!("{}", "Error creating the file, please try again: {}".red());
+                    println!("{}", "Error creating the file".red());
                     return;
                 }
             };
 
-            let _ = file.write_all(&json.file);
+            let file_size: usize = json_file_prop.file_size.parse::<usize>().unwrap();
+
+            const CHUNK_SIZE: usize = 1024 * 1024;
+            let mut current: usize = 0;
+            loop {
+                if current >= file_size {
+                    break;
+                }
+
+                let mut r = match reqwest::blocking::get(format!(
+                    "{}/download/{}/{}/{}",
+                    download_args.ip,
+                    download_args.download,
+                    current,
+                    current + CHUNK_SIZE
+                )) {
+                    Ok(r) => r,
+                    Err(_) => {
+                        println!("Error with retrieving the range");
+                        return;
+                    }
+                };
+
+                if !r.status().is_success() {
+                    println!("Error fetching range data: {}", r.status());
+                    return;
+                }
+
+                let mut buf: Vec<u8> = vec![];
+                let _ = r.copy_to(&mut buf).unwrap();
+                let _ = file.write_all(&buf);
+
+                current += CHUNK_SIZE;
+            }
 
             println!("{}", "Completed!".green());
         }
