@@ -75,7 +75,7 @@ fn generate_id() -> String {
 #[derive(Deserialize)]
 struct FileProp {
     file_name: String,
-    file_size: String,
+    total_chunks: usize,
 }
 
 fn main() {
@@ -219,22 +219,16 @@ fn main() {
                     return;
                 }
             };
-
-            let file_size: usize = json_file_prop.file_size.parse::<usize>().unwrap();
-
-            const CHUNK_SIZE: usize = 1024 * 1024;
-            let mut current: usize = 0;
+            let mut chunk_num = 0;
+            let total_chunks: usize = json_file_prop.total_chunks;
             loop {
-                if current >= file_size {
+                if chunk_num >= total_chunks {
                     break;
                 }
 
                 let mut r = match reqwest::blocking::get(format!(
-                    "{}/download/{}/{}/{}",
-                    download_args.ip,
-                    download_args.download,
-                    current,
-                    current + CHUNK_SIZE
+                    "{}/download/{}/{}",
+                    download_args.ip, download_args.download, chunk_num
                 )) {
                     Ok(r) => r,
                     Err(_) => {
@@ -250,9 +244,10 @@ fn main() {
 
                 let mut buf: Vec<u8> = vec![];
                 let _ = r.copy_to(&mut buf).unwrap();
+
                 let _ = file.write_all(&buf);
 
-                current += CHUNK_SIZE;
+                chunk_num += 1;
             }
 
             println!("{}", "Completed!".green());
