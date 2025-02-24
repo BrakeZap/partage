@@ -10,8 +10,11 @@ use sha2::{Digest, Sha256};
 use std::cmp::min;
 use std::fs;
 use std::fs::File;
+use std::io;
 use std::io::prelude::*;
 use std::path::Path;
+use std::sync::Arc;
+use std::thread::JoinHandle;
 #[derive(Subcommand)]
 enum Commands {
     /// Create and upload a file with a random id
@@ -30,7 +33,7 @@ struct CreateArgs {
     file: String,
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 struct DownloadArgs {
     ///Ip to use
     ip: String,
@@ -222,7 +225,7 @@ fn main() {
                 }
             };
 
-            let mut file = match File::create(json_file_prop.file_name) {
+            let mut file = match File::create(&json_file_prop.file_name) {
                 Ok(f) => f,
                 Err(_) => {
                     println!("{}", "Error creating the file".red());
@@ -232,34 +235,59 @@ fn main() {
             let mut chunk_num = 0;
             let total_chunks: usize = json_file_prop.total_chunks;
             let progress_bar = ProgressBar::new(total_chunks.try_into().unwrap());
+            let file_n = json_file_prop.file_name.clone();
+            let ref_json: Arc<FileProp> = Arc::new(json_file_prop);
+            let ref_download: Arc<DownloadArgs> = Arc::new(download_args.clone());
+
+            let mut threads: Vec<JoinHandle<()>> = Vec::new();
             loop {
                 if chunk_num >= total_chunks {
                     break;
                 }
+                let ref_json = ref_json.clone();
+                let ref_download = ref_download.clone();
+                let handle = std::thread::spawn(move || {
+                    let mut r = match reqwest::blocking::get(format!(
+                        "{}/download/{}/{}",
+                        ref_download.ip, ref_download.download, chunk_num
+                    )) {
+                        Ok(r) => r,
+                        Err(_) => {
+                            println!("Error with retrieving the range");
+                            return;
+                        }
+                    };
 
-                let mut r = match reqwest::blocking::get(format!(
-                    "{}/download/{}/{}",
-                    download_args.ip, download_args.download, chunk_num
-                )) {
-                    Ok(r) => r,
-                    Err(_) => {
-                        println!("Error with retrieving the range");
+                    if !r.status().is_success() {
+                        println!("Error fetching range data: {}", r.status());
                         return;
                     }
-                };
+                    {
+                        let mut f =
+                            File::create(format!("temp_{}_{}", ref_json.file_name, chunk_num))
+                                .unwrap();
 
-                if !r.status().is_success() {
-                    println!("Error fetching range data: {}", r.status());
-                    return;
-                }
+                        let mut buf: Vec<u8> = vec![];
+                        let _ = r.copy_to(&mut buf).unwrap();
 
-                let mut buf: Vec<u8> = vec![];
-                let _ = r.copy_to(&mut buf).unwrap();
-
-                let _ = file.write_all(&buf);
-
+                        let _ = f.write_all(&buf);
+                    }
+                });
+                threads.push(handle);
                 chunk_num += 1;
                 progress_bar.inc(1);
+            }
+
+            for t in threads {
+                let _ = t.join();
+            }
+
+            for i in 0..total_chunks {
+                let mut f = File::open(format!("temp_{}_{}", file_n, i)).unwrap();
+
+                let _ = io::copy(&mut f, &mut file);
+
+                let _ = fs::remove_file(format!("temp_{}_{}", file_n, i));
             }
 
             println!("{}", "Completed!".green());
