@@ -2,10 +2,13 @@ use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 use colored::Colorize;
+use indicatif::ProgressBar;
 use rand::Rng;
 use reqwest::blocking::multipart;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use std::cmp::min;
+use std::fs;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
@@ -101,47 +104,52 @@ fn main() {
                 }
             };
 
-            let mut vec: Vec<u8> = Vec::new();
+            let file_size = fs::metadata(path).unwrap().len();
+
+            //let mut vec: Vec<u8> = Vec::new();
 
             println!("Reading file...");
-            let _ = file.read_to_end(&mut vec);
+            //let _ = file.read_to_end(&mut vec);
 
-            let mut hasher = Sha256::new();
-            hasher.update(&vec[..]);
-            let hash = hasher.finalize();
-            let h: Vec<u8> = hash[..].to_vec();
+            //let mut hasher = Sha256::new();
+            //hasher.update(&vec[..]);
+            //let hash = hasher.finalize();
+            //let h: Vec<u8> = hash[..].to_vec();
 
             println!("Uploading file...");
             let client = reqwest::blocking::Client::new();
             let id = generate_id();
 
-            //TODO: Send file in chunks if it is large
+            const CHUNK_SIZE: u64 = 1024 * 1024; //1 MB
 
-            const CHUNK_SIZE: usize = 1024 * 1024; //1 MB
+            //let mut buffer: Vec<u8> = vec![0; CHUNK_SIZE];
 
-            let mut buffer: Vec<u8> = vec![0; CHUNK_SIZE];
+            let mut chunk_num: u64 = 0;
 
-            let mut chunk_num: usize = 0;
+            let total_chunks: u64 = file_size.div_ceil(CHUNK_SIZE);
 
-            let total_chunks: usize = vec.len().div_ceil(CHUNK_SIZE);
+            let progress_bar = ProgressBar::new(total_chunks);
 
-            let mut reader = std::io::Cursor::new(vec.clone());
+            //let mut reader = std::io::Cursor::new(vec.clone());
             let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            let mut to_read = file_size;
             loop {
-                let read = reader.read(&mut buffer).unwrap();
-
-                if read == 0 {
+                let mut buffer = vec![0; min(to_read, CHUNK_SIZE).try_into().unwrap()];
+                let total_read: u64 = file.read(&mut buffer).unwrap().try_into().unwrap();
+                if chunk_num >= total_chunks {
                     break;
                     //return;
                 }
 
+                //println!("{:?}", buffer);
+                //println!("To read: {}", to_read);
                 let form = multipart::Form::new()
                     .text("file_name", name.to_string())
                     .text("id", id.clone())
                     .text("chunk_num", chunk_num.to_string())
                     .text("total_chunks", total_chunks.to_string())
-                    .part("hash", multipart::Part::bytes(h.to_vec()))
-                    .part("file", multipart::Part::bytes(buffer[..read].to_vec()));
+                    .part("hash", multipart::Part::bytes(vec![0; 5]))
+                    .part("file", multipart::Part::bytes(buffer));
 
                 let res = client
                     .post(create_args.ip.clone() + "/create")
@@ -169,6 +177,8 @@ fn main() {
                 };
 
                 chunk_num += 1;
+                to_read -= total_read;
+                progress_bar.inc(1);
             }
 
             println!(
@@ -221,6 +231,7 @@ fn main() {
             };
             let mut chunk_num = 0;
             let total_chunks: usize = json_file_prop.total_chunks;
+            let progress_bar = ProgressBar::new(total_chunks.try_into().unwrap());
             loop {
                 if chunk_num >= total_chunks {
                     break;
@@ -248,6 +259,7 @@ fn main() {
                 let _ = file.write_all(&buf);
 
                 chunk_num += 1;
+                progress_bar.inc(1);
             }
 
             println!("{}", "Completed!".green());
